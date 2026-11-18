@@ -46,6 +46,56 @@ a { color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .shell { max-width: 1320px; margin: 0 auto; padding: var(--step-5) var(--step-6) var(--step-7); }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+/* The sticky page head: the brand and the section links, above everything. */
+.page-head { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+.head-inner { display: flex; align-items: center; justify-content: space-between; gap: var(--step-5); padding: var(--step-3) var(--step-6); }
+.head-nav { display: flex; flex-wrap: wrap; gap: var(--step-4); font-size: 13px; }
+.head-nav a { color: var(--muted); text-decoration: none; }
+.head-nav a:hover { color: var(--ink); }
+
+/* The stats row: four derived figures, one per card. aside.js writes the values. */
+.summary { background: var(--surface); border-bottom: 1px solid var(--border); }
+.summary .shell { padding: var(--step-5) var(--step-6); }
+.stat-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--step-4); }
+.stat {
+  display: grid; gap: var(--step-1); align-content: start;
+  border: 1px solid var(--border); border-radius: var(--radius-panel); padding: var(--step-4);
+  background: var(--canvas);
+}
+.stat-label { color: var(--muted); font-size: 12px; }
+.stat-value { font-family: var(--font-num); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.stat-note { color: var(--muted); font-size: 12px; }
+.summary-line { margin-top: var(--step-4); color: var(--muted); font-size: 13px; }
+
+.aside { margin-top: var(--step-6); }
+.aside-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--step-4); padding-top: 0; }
+.aside-card { padding: var(--step-5); display: grid; gap: var(--step-3); align-content: start; }
+.aside-steps { margin: 0; padding-left: var(--step-5); display: grid; gap: var(--step-2); color: var(--muted); font-size: 14px; }
+.aside-facts { border-left: 0; padding-left: 0; }
+.top-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--step-2); }
+.top-item {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: baseline;
+  gap: var(--step-1) var(--step-2); padding-bottom: var(--step-2); border-bottom: 1px solid var(--border);
+}
+.top-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.top-rank { color: var(--muted); font-size: 12px; }
+.top-name { font-weight: 600; overflow-wrap: anywhere; }
+.top-value { font-weight: 500; text-align: right; }
+.top-cat { grid-column: 2; }
+.top-share { grid-column: 3; color: var(--muted); font-size: 12px; text-align: right; }
+.cat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--step-3); }
+.cat-item { display: grid; gap: var(--step-1); }
+.cat-head { display: flex; align-items: baseline; gap: var(--step-2); }
+.cat-name { font-weight: 600; overflow-wrap: anywhere; }
+.cat-count { flex: none; }
+.cat-total { margin-left: auto; font-weight: 500; }
+.cat-share { color: var(--muted); font-size: 12px; min-width: 44px; text-align: right; }
+.cat-bar { width: 100%; }
 .top {
   display: flex; align-items: flex-start; justify-content: space-between; gap: var(--step-5);
   padding-bottom: var(--step-4); border-bottom: 1px solid var(--border);
@@ -137,8 +187,16 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .steps b { display: block; font-weight: 500; }
 .cost { color: var(--muted); font-size: 12px; font-family: var(--font-num); }
 
+/* The foot: the model caveat and the snapshot identity, so a copied page still says what it is. */
+.page-foot { margin-top: var(--step-6); border-top: 1px solid var(--border); background: var(--surface); }
+.foot-inner { display: grid; gap: var(--step-2); padding: var(--step-5) var(--step-6); }
+.foot-inner p { max-width: 90ch; }
+
 @media (max-width: 900px) {
   .shell { padding: var(--step-4); }
+  .head-inner { padding: var(--step-3) var(--step-4); }
+  .summary .shell { padding: var(--step-4); }
+  .stat-row { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   .lede { grid-template-columns: 1fr; gap: var(--step-4); }
   .facts { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; padding-top: var(--step-4); }
   .field input { min-width: 0; width: 100%; }

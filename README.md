@@ -46,12 +46,26 @@ freshness_mult= 1.0 + (1 - min(age_days, 1095) / 1095) x 0.25
 
 ## Dashboard
 
-`dashboard/` is a static page: `index.html` + `app.css` + `app.js`, reading `window.RADAR` from
-`data.js`. It renders the ranked board with sortable columns, filters for category, chain and minimum
-TVL, a "hide low freshness" switch, the live-token section, a "how to farm" panel, and a per-protocol
-detail drawer with the model's own multipliers and the protocol's six-step farm plan. The page
-recomputes each row's implied value with the same arithmetic as `lib/model.ts` and shows whether it
-matches `board.json`.
+`dashboard/` is a static page: `index.html` + `app.css` + `app.js` + `aside.js`, reading `window.RADAR`
+from `data.js`. `app.js` renders the ranked board with sortable columns, filters for category, chain and
+minimum TVL, a "hide low freshness" switch, the live-token section, a "how to farm" panel, and a
+per-protocol detail drawer with the model's own multipliers and the protocol's six-step farm plan. The
+page recomputes each row's implied value with the same arithmetic as `lib/model.ts` and shows whether it
+matches `board.json`. `aside.js` is the derived summary beside the board: the four stat cards (protocols
+counted, watchlist coverage, top implied value, farm signals), the top ten by implied value with each
+row's share of the board, the implied value by category, and the totals, median, chain and category
+counts. It is dependency-free and exposes `window.RadarAside`.
+
+## Tests
+
+```sh
+node --experimental-strip-types --test test/radar.test.ts
+```
+
+`test/radar.test.ts` builds the board in process from the sealed snapshot and asserts the gate's
+invariants: 200 rows, ranks 1..200 contiguous, strictly descending distinct implied values, full
+watchlist coverage, 3..12 farm steps of 20..600 characters, and `boardIssue` clean. It also loads
+`dashboard/aside.js` and checks its derived totals against the board.
 
 ## Files
 
@@ -60,6 +74,7 @@ matches `board.json`.
 | `main.ts` | reads the snapshot, writes the board, data, dashboard, screenshots and dossier |
 | `lib/model.ts` | snapshot validation, scoring model, farm plans, board gate |
 | `vendor/makefun-board.ts` | the vendored make.fun dossier library (`buildDossier`) |
-| `dashboard/` | the static page |
+| `dashboard/` | the static page: `index.html`, `app.css`, `app.js`, `aside.js` |
+| `test/radar.test.ts` | the board and aside checks, on `node:test` |
 | `screenshots/` | board, detail and filtered views |
 | `LICENSE` | MIT |

@@ -3,13 +3,124 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="description" content="Token Radar ranks pre-token protocols by an implied launch value computed from TVL, growth, age and category, and prints a six-step farm plan for every row.">
 <title>Token Radar: pre-token protocols ranked by implied value</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true"></main>
+
+<!-- A shell: app.js fills #board, aside.js fills the stats and the three lists, all from window.RADAR. -->
+<header class="page-head">
+  <div class="shell head-inner">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="brand-name">Token Radar</span>
+    </div>
+    <nav class="head-nav" aria-label="Sections">
+      <a href="#aside-summary">Summary</a>
+      <a href="#board">Board</a>
+      <a href="#farm">How to farm</a>
+      <a href="#model">Model</a>
+      <a href="#footer">Notes</a>
+    </nav>
+  </div>
+</header>
+
+<!-- aside.js writes one value into each <b> by id, leaving the labels, so the page reads before it runs. -->
+<section class="summary" id="aside-summary" aria-labelledby="summary-title">
+  <div class="shell">
+    <h2 id="summary-title" class="sr-only">Snapshot summary</h2>
+    <div class="stat-row">
+      <div class="stat">
+        <span class="stat-label">Protocols counted</span>
+        <b class="stat-value" id="stat-protocols">n/a</b>
+        <span class="stat-note" id="stat-protocols-note">every protocol in the sealed snapshot</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Watchlist coverage</span>
+        <b class="stat-value" id="stat-watchlist">n/a</b>
+        <span class="stat-note" id="stat-watchlist-note">watchlist slugs the board carries</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Top implied value</span>
+        <b class="stat-value" id="stat-top">n/a</b>
+        <span class="stat-note" id="stat-top-note">the strongest pre-token row</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Farm signals</span>
+        <b class="stat-value" id="stat-farm">n/a</b>
+        <span class="stat-note" id="stat-farm-note">pre-token protocols with a plan</span>
+      </div>
+    </div>
+    <p class="summary-line" id="aside-line">Reading the snapshot.</p>
+  </div>
+</section>
+
+<main id="board" tabindex="-1" aria-busy="true">
+  <noscript>
+    <p class="shell">This page renders from <code>data.js</code> with plain JavaScript. Turn scripting on to
+      see the ranked board; the same rows are in <code>board.json</code> beside this page.</p>
+  </noscript>
+</main>
+
+<!-- The aside: the derived breakdowns, filled by aside.js from the same rows the board renders. -->
+<aside class="aside" id="aside" aria-labelledby="aside-title">
+  <div class="shell aside-grid">
+    <section class="panel aside-card">
+      <h2 id="aside-title">Reading the board</h2>
+      <p class="sub">Every row is scored by one function of the snapshot's own figures. Ranks are a total
+        order: no two rows share an implied value. The watchlist is the floor, the early rows are the
+        pre-token protocols below it, and the live-token protocols are set aside because their market cap
+        is a fact rather than a model.</p>
+      <ol class="aside-steps">
+        <li>Sort by implied value to see the strongest launch case first.</li>
+        <li>Filter to one category or chain to compare like with like.</li>
+        <li>Open a row for its multipliers and its six-step farm plan.</li>
+        <li>Read the implied value as an estimate, never as a price.</li>
+      </ol>
+    </section>
+
+    <section class="panel aside-card">
+      <h2>Top ten by implied value</h2>
+      <p class="sub">The ten strongest pre-token rows, with their share of the whole board's implied value.</p>
+      <ol class="top-list" id="aside-top-ten"></ol>
+    </section>
+
+    <section class="panel aside-card">
+      <h2>Implied value by category</h2>
+      <p class="sub">Where the board's implied value sits, by the category the snapshot records.</p>
+      <ul class="cat-list" id="aside-categories"></ul>
+    </section>
+
+    <section class="panel aside-card">
+      <h2>Where the rows sit</h2>
+      <ul class="facts aside-facts">
+        <li class="fact"><span>Board rows</span><b class="num" id="aside-rows">n/a</b></li>
+        <li class="fact"><span>Watchlist rows</span><b class="num" id="aside-watchlist-rows">n/a</b></li>
+        <li class="fact"><span>Early rows below the floor</span><b class="num" id="aside-early">n/a</b></li>
+        <li class="fact"><span>Live-token protocols</span><b class="num" id="aside-live">n/a</b></li>
+        <li class="fact"><span>Median implied value</span><b class="num" id="aside-median">n/a</b></li>
+        <li class="fact"><span>Total implied value</span><b class="num" id="aside-total">n/a</b></li>
+        <li class="fact"><span>Chains represented</span><b class="num" id="aside-chains">n/a</b></li>
+        <li class="fact"><span>Categories represented</span><b class="num" id="aside-cat-count">n/a</b></li>
+      </ul>
+    </section>
+  </div>
+</aside>
+
+<footer class="page-foot" id="footer">
+  <div class="shell foot-inner">
+    <p class="sub">Token Radar is a model, not advice. Implied value is computed from a sealed snapshot of
+      the DeFiLlama-style protocol index; it is not a price, a forecast or an offer.</p>
+    <p class="sub">Snapshot <span class="num" id="footer-as-of">n/a</span>, model
+      <span class="num" id="footer-model">n/a</span>, source <span class="num" id="footer-source">n/a</span>.</p>
+  </div>
+</footer>
+
 <script src="../data.js"></script>
 <script src="app.js"></script>
+<script src="aside.js"></script>
 </body>
 </html>
