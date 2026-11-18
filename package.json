@@ -1,0 +1,16 @@
+{
+  "name": "token-radar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline token launch radar: scores and ranks recent DEX and launchpad listings.",
+  "type": "module",
+  "license": "MIT",
+  "main": "main.ts",
+  "scripts": {
+    "start": "node main.ts",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
