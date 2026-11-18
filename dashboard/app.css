@@ -104,6 +104,15 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .button { min-height: 36px; padding: 0 var(--step-4); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
 .button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
 
+.field input[type="number"] { min-width: 130px; width: 150px; }
+.check { display: inline-flex; align-items: center; gap: var(--step-2); min-height: 36px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.check input { min-width: 0; }
+.farm, .live { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-3); }
+.farm .playbook { padding-left: var(--step-5); }
+.farm .playbook li { color: var(--muted); }
+.live .panel { border: 0; border-radius: 0; background: transparent; }
+.live .table-wrap { margin: 0 calc(var(--step-5) * -1) calc(var(--step-5) * -1); }
+
 .detail {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 92vw); z-index: 10;
   background: var(--surface); border-left: 1px solid var(--border); padding: var(--step-5);

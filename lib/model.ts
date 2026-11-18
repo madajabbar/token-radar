@@ -1,20 +1,24 @@
 // The token radar's model: one snapshot of the protocol universe in, one ranked board out.
 //
-// The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and may add
-// pre-token protocols below the watchlist floor: the early rows the radar exists to find. A protocol is
-// pre-token when its index entry records no token (no market cap, no CoinGecko id, no symbol); the
-// snapshot's live-token protocols are kept apart and shown as the market's own values, never mixed into
-// the ranked board.
+// The board covers every slug in the snapshot's watchlist (the floor, never a ceiling) and adds the
+// strongest pre-token protocols below the watchlist floor: the early rows the radar exists to find. A
+// protocol is pre-token when its index entry records no token (no market cap, no CoinGecko id, no
+// symbol); the snapshot's live-token protocols are kept apart and shown as the market's own values,
+// never mixed into the ranked board. Exchange protocols and versioned pools (a name ending in a release
+// marker like "V2" or "2.0") are a different asset than the protocol they wrap, so they are skipped.
 //
-// Implied value follows only from the snapshot's own figures:
+// Implied value follows only from the snapshot's own figures and three modifiers:
 //
-//   base       = tvl_usd x BASE_MULTIPLE
-//   growth     = clamp(change_7d, -60, 120) per cent
-//   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT
-//   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
-//   implied    = max(1, round(base x growthMult x maturity))
+//   growth       = clamp(change_7d, -60, 120) per cent
+//   growthMult   = 1 + (growth / 100) x GROWTH_WEIGHT
+//   maturityMult = 0.6 + min(age_days, 1095) / 1095 x 0.4        (age_days unknown: 365)
+//   freshness    = 1.0 + (1 - min(age_days, 1095) / 1095) x 0.25 (young protocols rank higher)
+//   modifier     = BASE_MULTIPLE x categoryMult x chainMult x freshness
+//   raw          = max(1, round(tvl_usd x growthMult x maturityMult x modifier x (1 + tiebreak)))
 //
-// The constants are the house model's, stated in the dashboard and changeable in the model sandbox. No
+// A deterministic slug tiebreak and a pass that lowers a repeated value by one keep every row's
+// implied_value_usd distinct and the board strictly descending, so the ranking is a total order. The
+// constants are the house model's, stated in the dashboard and changeable in the model sandbox. No
 // protocol name is ever special-cased: the same function scores every row.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
@@ -50,6 +54,10 @@ export interface ModelConstants {
   maturity_range: number;
   maturity_days: number;
   unknown_age_days: number;
+  freshness_floor: number;
+  freshness_range: number;
+  modifier_floor: number;
+  modifier_cap: number;
 }
 
 export const MODEL: ModelConstants = {
@@ -61,16 +69,50 @@ export const MODEL: ModelConstants = {
   maturity_range: 0.4,
   maturity_days: 1095,
   unknown_age_days: 365,
+  freshness_floor: 1.0,
+  freshness_range: 0.25,
+  modifier_floor: 0.2,
+  modifier_cap: 0.45,
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-1';
+export const MODEL_VERSION = 'radar-2';
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
 
 /** How many live-token protocols the Live token view carries, by market cap. */
 export const LIVE_ROWS = 24;
+
+/** The category boost: protocols whose token would inherit a fee or a collateral stream, slightly up. */
+const CATEGORY_MODIFIER: Record<string, number> = {
+  lending: 1.08,
+  'uncollateralized lending': 1.08,
+  cdp: 1.06,
+  'cdp manager': 1.06,
+  'collateral management': 1.06,
+  restaking: 1.07,
+  'liquid restaking': 1.07,
+  rwa: 1.05,
+  'liquid staking': 1.04,
+  'staking pool': 1.03,
+  yield: 1.03,
+  'yield aggregator': 1.03,
+  'interest rate derivatives': 1.03,
+};
+
+/** The chain boost: deep-liquidity chains carry a slightly higher launch ceiling. */
+const CHAIN_MODIFIER: Record<string, number> = {
+  ethereum: 1.03,
+  solana: 1.02,
+  base: 1.02,
+  arbitrum: 1.02,
+  optimism: 1.01,
+  'op mainnet': 1.01,
+  polygon: 1.01,
+  avalanche: 1.01,
+  bitcoin: 1.01,
+};
 
 /** A farm step: the action, what it costs, and how long it takes. */
 export interface FarmStep {
@@ -100,6 +142,11 @@ export interface BoardRow {
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
+    freshness_multiplier: number;
+    category_multiplier: number;
+    modifier: number;
+    tiebreak: number;
+    adjust: number;
     age_days: number | null;
   };
   farm_steps: string[];
@@ -120,6 +167,11 @@ export interface RadarRow {
   implied_value_usd: number;
   growth_multiplier: number;
   maturity_multiplier: number;
+  freshness_multiplier: number;
+  category_multiplier: number;
+  modifier: number;
+  tiebreak: number;
+  adjust: number;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -172,17 +224,64 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** The three multipliers and the implied value one protocol gets under `model`. */
-export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
+const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
+
+/** The category-and-chain modifier: a modest boost for the categories a token inherits cash flow from. */
+export function categoryModifier(p: SnapshotProtocol): number {
+  const category = (p.category ?? '').toLowerCase();
+  const chain = (p.chains[0] ?? '').toLowerCase();
+  const value = (CATEGORY_MODIFIER[category] ?? 1) * (CHAIN_MODIFIER[chain] ?? 1);
+  return round4(Math.min(1.2, Math.max(0.9, value)));
+}
+
+/** A stable 0..1 fraction from the slug, so equal raw scores still break apart deterministically. */
+function slugTiebreak(slug: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < slug.length; i++) {
+    h ^= slug.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return (h % 997) / 1_000_000;
+}
+
+/** What one protocol scores under `model`: every multiplier the dashboard can show and check. */
+export interface ImpliedValue {
+  implied: number;
+  growthPct: number;
+  growthMult: number;
+  maturityMult: number;
+  freshnessMult: number;
+  categoryMult: number;
+  modifier: number;
+  tiebreak: number;
+  age: number | null;
+}
+
+/** The multipliers and the raw implied value one protocol gets under `model`. */
+export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): ImpliedValue {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
   const ageForModel = age ?? model.unknown_age_days;
-  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-  const base = protocol.tvl_usd * model.base_multiple;
-  const implied = Math.max(1, Math.round(base * growthMult * maturityMult));
-  return { implied, growthPct, growthMult, maturityMult, age };
+  const boundedAge = Math.min(Math.max(ageForModel, 0), model.maturity_days);
+  const maturityMult = model.maturity_floor + (boundedAge / model.maturity_days) * model.maturity_range;
+  const freshnessMult = model.freshness_floor + (1 - boundedAge / model.maturity_days) * model.freshness_range;
+  const categoryMult = categoryModifier(protocol);
+  const modifier = Math.min(model.modifier_cap, Math.max(model.modifier_floor, model.base_multiple * categoryMult * freshnessMult));
+  const tiebreak = slugTiebreak(protocol.slug);
+  const implied = Math.max(1, Math.round(protocol.tvl_usd * growthMult * maturityMult * modifier * (1 + tiebreak)));
+  return {
+    implied,
+    growthPct,
+    growthMult,
+    maturityMult,
+    freshnessMult,
+    categoryMult,
+    modifier,
+    tiebreak,
+    age,
+  };
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -211,7 +310,7 @@ export interface BoardSummary {
   live_size: number;
 }
 
-/** The protocols the board ranks, strongest first, with ranks 1..n. */
+/** The protocols the board ranks, strongest first, with ranks 1..n and distinct implied values. */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
@@ -229,38 +328,52 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     .slice(0, EARLY_ROWS);
   for (const p of early) chosen.set(p.slug, p);
 
-  const scored = [...chosen.values()].map((p) => {
-    const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, model);
-    return { p, implied, growthPct, growthMult, maturityMult, age };
+  const scored = [...chosen.values()].map((p) => ({ p, value: impliedValue(p, snapshot.as_of, model) }));
+  scored.sort(
+    (a, b) =>
+      b.value.implied - a.value.implied ||
+      b.value.tiebreak - a.value.tiebreak ||
+      (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0),
+  );
+  // One pass from the top: a raw value that would repeat the one above it drops by one, so the board's
+  // implied values are a strictly descending sequence and rank is a total order.
+  let ceiling = Number.POSITIVE_INFINITY;
+  return scored.map((s, i) => {
+    const raw = s.value.implied;
+    let implied = raw >= ceiling ? ceiling - 1 : raw;
+    if (implied < 1) implied = 1;
+    ceiling = implied;
+    return {
+      rank: i + 1,
+      slug: s.p.slug,
+      name: s.p.name,
+      category: s.p.category,
+      chains: s.p.chains,
+      tvl_usd: s.p.tvl_usd,
+      change_7d: s.p.change_7d,
+      mcap_usd: s.p.mcap_usd,
+      listed_at: s.p.listed_at,
+      gecko_id: s.p.gecko_id,
+      symbol: s.p.symbol,
+      token_status: 'pre-token' as const,
+      age_days: s.value.age,
+      implied_value_usd: implied,
+      model: {
+        base_multiple: model.base_multiple,
+        growth_pct: s.value.growthPct,
+        growth_multiplier: s.value.growthMult,
+        maturity_multiplier: s.value.maturityMult,
+        freshness_multiplier: s.value.freshnessMult,
+        category_multiplier: s.value.categoryMult,
+        modifier: s.value.modifier,
+        tiebreak: s.value.tiebreak,
+        adjust: raw - implied,
+        age_days: s.value.age,
+      },
+      farm_steps: farmSteps(s.p, s.value.age).map(stepText),
+    };
   });
-  scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  return scored.map((s, i) => ({
-    rank: i + 1,
-    slug: s.p.slug,
-    name: s.p.name,
-    category: s.p.category,
-    chains: s.p.chains,
-    tvl_usd: s.p.tvl_usd,
-    change_7d: s.p.change_7d,
-    mcap_usd: s.p.mcap_usd,
-    listed_at: s.p.listed_at,
-    gecko_id: s.p.gecko_id,
-    symbol: s.p.symbol,
-    token_status: 'pre-token',
-    age_days: s.age,
-    implied_value_usd: s.implied,
-    model: {
-      base_multiple: model.base_multiple,
-      growth_pct: s.growthPct,
-      growth_multiplier: round4(s.growthMult),
-      maturity_multiplier: round4(s.maturityMult),
-      age_days: s.age,
-    },
-    farm_steps: farmSteps(s.p, s.age).map(stepText),
-  }));
 }
-
-const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
 
 /** A step as one string: its action, then its cost and time, within the gate's 20..600 characters. */
 export function stepText(step: FarmStep): string {
@@ -384,6 +497,11 @@ export function radarRow(row: BoardRow): RadarRow {
     implied_value_usd: row.implied_value_usd,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
+    freshness_multiplier: row.model.freshness_multiplier,
+    category_multiplier: row.model.category_multiplier,
+    modifier: row.model.modifier,
+    tiebreak: row.model.tiebreak,
+    adjust: row.model.adjust,
   };
 }
 
@@ -451,22 +569,24 @@ export function parseSnapshot(text: string): Snapshot {
   };
 }
 
-/** Why a board is not one the gate will take, or null: coverage, ranks, order, one shared implied value, and farm steps. */
+/** Why a board is not one the gate will take, or null: coverage, ranks, order, distinct values, farm steps. */
 export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null {
   const slugs = new Set(board.map((r) => r.slug));
   const missing = snapshot.watchlist.filter((s) => !slugs.has(s));
   if (missing.length > 0) return `the board misses ${missing.length} watchlist slug${missing.length === 1 ? '' : 's'}: ${missing.slice(0, 5).join(', ')}`;
   const ranks = board.map((r) => r.rank).sort((a, b) => a - b);
   for (let i = 0; i < ranks.length; i++) if (ranks[i] !== i + 1) return `rank ${i + 1} is ${ranks[i]}`;
-  for (let i = 1; i < board.length; i++) if (board[i]!.implied_value_usd > board[i - 1]!.implied_value_usd) return `row ${i + 1} outranks row ${i} on implied value`;
-  if (board.length >= 2 && board[0]!.implied_value_usd === board[board.length - 1]!.implied_value_usd) {
-    return `all ${board.length} rows share the same implied value $${board[0]!.implied_value_usd}: a board that ranks nothing by value is not a ranking`;
-  }
+  for (let i = 1; i < board.length; i++) if (board[i]!.implied_value_usd >= board[i - 1]!.implied_value_usd) return `row ${i + 1} does not rank below row ${i} on implied value`;
+  const values = new Set(board.map((r) => r.implied_value_usd));
+  if (values.size !== board.length) return `the board repeats ${board.length - values.size} implied value${board.length - values.size === 1 ? '' : 's'}: a ranking needs distinct values`;
+  if (board.length < 100) return `the board holds ${board.length} rows: the gate wants at least 100`;
+  if (board.length > 4000) return `the board holds ${board.length} rows: the gate wants at most 4000`;
   for (const r of board) {
     const steps = r.farm_steps;
     if (steps.length < 3 || steps.length > 12) return `${r.slug} has ${steps.length} farm steps`;
     for (const s of steps) if (s.length < 20 || s.length > 600) return `${r.slug} has a farm step of ${s.length} characters`;
     if (!Number.isSafeInteger(r.implied_value_usd) || r.implied_value_usd <= 0) return `${r.slug} has implied value ${r.implied_value_usd}`;
+    if (typeof r.name !== 'string' || r.name.length === 0) return `${r.slug} has no name`;
   }
   return null;
 }
