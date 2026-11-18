@@ -61,25 +61,28 @@ an hour, and `12m ago`-style age labels. It refreshes every 20 seconds.
 
 ## HTTP API
 
-`GET /api/tokens` returns JSON:
+`GET /api/tokens?chain=SOL&min_liquidity=50000&no_rugged=1` returns JSON:
 
 ```jsonc
 {
   "source": "offline-demo",
   "now": 1795009655,
   "total": 57,
-  "count": 12,
+  "count": 10,
   "filters": { "chain": "SOL", "minLiquidity": 50000, "hideRugged": true },
   "sort": { "key": "score", "dir": "desc" },
   "facets": { "chains": ["ARB", "BASE", "BNB", "ETH", "SOL", "SUI"],
-              "launchpads": ["Aerodrome", "BaseSwap", "..."] },
+              "launchpads": ["Aerodrome", "BaseSwap", "Camelot", "Cetus",
+                             "LetsBONK", "Meteora", "Moonshot", "Orca",
+                             "PancakeSwap", "Raydium", "Turbos", "Uniswap V3",
+                             "Uniswap V4", "four.meme", "pump.fun"] },
   "tokens": [
     {
-      "id": "sol-pepe2", "name": "Pepe 2.0", "symbol": "PEPE2", "chain": "SOL",
-      "launchpad": "pump.fun", "launch_ts": 1795009415,
-      "liquidity_usd": 412000, "volume_24h_usd": 1940000, "market_cap_usd": 6800000,
-      "holders": 3120, "buys": 9840, "sells": 4120, "hype_score": 94, "rugged": false,
-      "score": 80.4, "age_seconds": 240, "age_label": "4m ago"
+      "id": "sol-radar", "name": "Radar Dog", "symbol": "RDOG", "chain": "SOL",
+      "launchpad": "Raydium", "launch_ts": 1795006953,
+      "liquidity_usd": 640000, "volume_24h_usd": 2400000, "market_cap_usd": 9700000,
+      "holders": 5410, "buys": 12300, "sells": 5640, "hype_score": 91, "rugged": false,
+      "score": 81.15, "age_seconds": 3482, "age_label": "58m ago"
     }
   ]
 }
