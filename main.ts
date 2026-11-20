@@ -1,68 +1,70 @@
-// token-radar-01 entry point (Node 22+, standard library only, erasable TypeScript).
+// token-radar-01 — entry point for the make.fun hand-in (Node 22+, standard library only, erasable TS).
 //
-// Reads one sealed snapshot (--input <snapshot.json|directory>, else /input/snapshot.json), scores every
-// pre-token protocol with lib/model.ts, and writes the hand-in:
+// One sealed snapshot goes in; a static dashboard hand-in comes out. This file owns only the CLI and the
+// output contract: scoring, ranking and dossier assembly live in lib/model.ts and vendor/makefun-board.ts.
 //
-//   /output/board.json      the ranked board, { row_count, rows }
-//   /output/data.js         window.RADAR = {...}, the dashboard's whole dataset
-//   /output/dashboard/      dashboard/ copied beside it (index.html reads ../data.js)
-//   /output/screenshots/    screenshots/ copied beside it
-//   /output/dossier.json    the vendored make.fun dossier of the two above
+//   node main.ts --input <snapshot.json|directory> [--output <directory>]
 //
-// The dashboard is static: no build, no install, no network. The dossier is written last, because the
-// scorer rebuilds it from the rest of /output and compares bytes; it is only correct when the outputs it
-// describes are already in place.
+// --input falls back to /input; --output falls back to $MAKEFUN_OUTPUT_DIR, then /output. The snapshot is
+// read and scored before a single byte is written, so a bad run leaves no half-written output tree:
+// exit 2 means there was no snapshot to read, exit 1 means the scored board failed the gate.
 //
-// Exit codes are the gate's: 2 when there is no snapshot to read, 1 when the board fails lib/model.ts's
-// boardIssue or fewer than three screenshots are handed in, 0 otherwise.
-//
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input snapshot.json
+// Write order is fixed: board.json, data.js, dashboard/, screenshots/, and dossier.json last — the
+// vendored scorer rebuilds the dossier from the files already on disk, so they must all be in place first.
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boardIssue, buildRadar, dataScript, parseSnapshot, type Snapshot } from './lib/model.ts';
+import {
+  boardIssue,
+  buildRadar,
+  dataScript,
+  parseSnapshot,
+  type BoardRow,
+  type RadarData,
+  type Snapshot,
+} from './lib/model.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
 
-/** main.ts's own directory: where dashboard/ and screenshots/ live, whatever the working directory is. */
+/** This file's directory: dashboard/ and screenshots/ sit beside it, wherever the process is started. */
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 
-/** The scorer's text cap (reference/gate.json): the one cap that shapes the dossier's bytes. */
-const TEXT_MAX_BYTES = 65_536;
-/** The scorer's remaining caps. They only refuse: a dossier that would need them is a bad hand-in. */
+/** The caps the vendored scorer checks a dossier against (reference/gate.json). */
 const CAPS = {
-  text_max_bytes: TEXT_MAX_BYTES,
+  text_max_bytes: 65_536,
   screenshots: { max: 4, max_bytes: 524_288 },
   dashboard: { max_files: 400, max_bytes: 4_194_304 },
 };
 
-/** The gate's floor: a board with fewer rows than this is not a board. */
-const MIN_SCREENSHOTS = 3;
+/** The gate's floor: fewer screenshots than this is not a hand-in. */
+const SCREENSHOT_FLOOR = 3;
 
-/** An argument value: `--name value` or `--name=value`, else the fallback. */
+/** First `--name <value>` or `--name=<value>` on the command line, else `fallback`. */
 function option(name: string, fallback: string): string {
-  const flag = `--${name}`;
-  const argv = process.argv;
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === flag && i + 1 < argv.length) return argv[i + 1]!;
-    if (argv[i]!.startsWith(`${flag}=`)) return argv[i]!.slice(flag.length + 1);
+  const bare = `--${name}`;
+  const prefixed = `${bare}=`;
+  for (const [i, current] of process.argv.entries()) {
+    if (current === bare) {
+      if (i + 1 < process.argv.length) return process.argv[i + 1]!;
+      continue;
+    }
+    if (current.startsWith(prefixed)) return current.slice(prefixed.length);
   }
   return fallback;
 }
 
-/** Why the run cannot start: no snapshot at `input`, or a snapshot the model refuses. */
+/** Print `message` to stderr under the tool's prefix and exit with `code`. */
 function fail(code: number, message: string): never {
   process.stderr.write(`token radar: ${message}\n`);
   process.exit(code);
 }
 
-/** The snapshot's path: the --input value itself, or its snapshot.json when it is a directory. */
+/** `input` may name the snapshot file itself or a directory holding snapshot.json. */
 function snapshotPath(input: string): string {
   return input.endsWith('.json') ? input : join(input, 'snapshot.json');
 }
 
-/** A protocol with no token on record is pre-token; the rest already trade and never enter the board. */
+/** Read and parse the sealed snapshot; exit 2 when it is absent or unreadable. */
 function loadSnapshot(input: string): Snapshot {
   const path = snapshotPath(input);
   if (!existsSync(path)) {
@@ -75,51 +77,61 @@ function loadSnapshot(input: string): Snapshot {
   }
 }
 
-/** Copy one directory's regular, non-dot files into `to`, and return their names. */
-function copyDir(from: string, to: string): string[] {
+/** Copy `from`'s regular, non-dot files into `to`; returns the names copied, [] if `from` is absent. */
+function copyInto(from: string, to: string): string[] {
   if (!existsSync(from)) return [];
   mkdirSync(to, { recursive: true });
-  const names: string[] = [];
+  const copied: string[] = [];
   for (const name of readdirSync(from)) {
     if (name.startsWith('.')) continue;
     const source = join(from, name);
     if (!statSync(source).isFile()) continue;
     copyFileSync(source, join(to, name));
-    names.push(name);
+    copied.push(name);
   }
-  return names;
+  return copied;
 }
 
-// ---------------------------------------------------------------- run
+/** Exit 1 unless `shots` clears the gate's screenshot floor. */
+function assertEnoughShots(shots: string[]): void {
+  if (shots.length >= SCREENSHOT_FLOOR) return;
+  fail(
+    1,
+    `screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in ${SCREENSHOT_FLOOR} — the board, a detail view and a filtered view`,
+  );
+}
 
-// The snapshot first: exit 2 before anything is written, so a bad run never leaves a half an output.
+/** Write the ranked board and the dashboard dataset under `output`; returns both paths. */
+function writeBoard(output: string, board: BoardRow[], radar: RadarData): { boardPath: string; dataPath: string } {
+  const boardPath = join(output, 'board.json');
+  const dataPath = join(output, 'data.js');
+  writeFileSync(boardPath, `${JSON.stringify({ row_count: board.length, rows: board })}\n`);
+  writeFileSync(dataPath, dataScript(radar));
+  return { boardPath, dataPath };
+}
+
+// --------------------------------------------------------------------------------------------- run
+
+// The snapshot comes first: exit before the output directory is created or touched.
 const snapshot = loadSnapshot(option('input', '/input'));
-const out = option('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
+const output = option('output', process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
 const { board, radar } = buildRadar(snapshot);
 const issue = boardIssue(board, snapshot);
 if (issue !== null) fail(1, `the model wrote a board the gate refuses: ${issue}`);
 
-mkdirSync(out, { recursive: true });
-const boardPath = join(out, 'board.json');
-const dataPath = join(out, 'data.js');
-writeFileSync(boardPath, `${JSON.stringify({ row_count: board.length, rows: board })}\n`);
-writeFileSync(dataPath, dataScript(radar));
+mkdirSync(output, { recursive: true });
+const { boardPath, dataPath } = writeBoard(output, board, radar);
 
-const dashboardDir = join(out, 'dashboard');
-const screenshotsDir = join(out, 'screenshots');
-const dashboardFiles = copyDir(join(HERE, 'dashboard'), dashboardDir);
-const shots = copyDir(join(HERE, 'screenshots'), screenshotsDir);
-if (shots.length < MIN_SCREENSHOTS) {
-  fail(
-    1,
-    `screenshots/ holds ${shots.length} image${shots.length === 1 ? '' : 's'}: hand in ${MIN_SCREENSHOTS} — the board, a detail view and a filtered view`,
-  );
-}
+const dashboardDir = join(output, 'dashboard');
+const screenshotsDir = join(output, 'screenshots');
+const dashboardFiles = copyInto(join(HERE, 'dashboard'), dashboardDir);
+const shots = copyInto(join(HERE, 'screenshots'), screenshotsDir);
+assertEnoughShots(shots);
 
-// The dossier is a description of what is already in `out`, and must be written last.
-const dossierPath = join(out, 'dossier.json');
-writeFileSync(dossierPath, buildDossier(out, CAPS));
+// Written last: the dossier describes the outputs that are already on disk.
+const dossierPath = join(output, 'dossier.json');
+writeFileSync(dossierPath, buildDossier(output, CAPS));
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
